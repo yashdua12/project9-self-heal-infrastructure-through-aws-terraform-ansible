@@ -1,0 +1,40 @@
+---
+- name: Self-Heal EC2 Instances
+  hosts: webhosts
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Update package cache
+      ansible.builtin.apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Check if HTTPD service is running
+      ansible.builtin.service_facts:
+
+    - name: Install Apache2 if not present
+      ansible.builtin.apt:
+        name: apache2
+        state: present
+
+    - name: Start HTTPD if not running
+      ansible.builtin.service:
+        name: apache2
+        state: started
+        enabled: yes
+      when: "'apache2.service' not in services or services['apache2.service'].state != 'running'"
+
+    - name: Ensure disk usage is under 80%
+      shell: df -h / | awk 'NR==2 {print $5}' | tr -d '%'
+      register: disk_usage
+      changed_when: false
+
+    - name: Cleanup logs if disk usage above 80%
+      shell: rm -rf /var/log/*.log
+      when: disk_usage.stdout|int > 75
+
+    - name: Reboot instance if required
+      reboot:
+        msg: "Reboot initiated by self-heal playbook"
+      when: disk_usage.stdout|int > 60
